@@ -2,22 +2,38 @@
 // CONSTANTS
 // ============================================
 
+import config from '@/config/env';
+
+// Free tier limit
 export const FREE_LIMIT = 10;
 
-export const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://YOUR_FIREBASE_URL';
+// Firebase API URL
+export const API_BASE_URL = config.FIREBASE_API_URL;
 
+// Lemon Squeezy Configuration
 export const LEMON_SQUEEZY = {
-  STORE_URL: 'https://YOUR_STORE.lemonsqueezy.com',
-  PRODUCT_ID: 'YOUR_PRODUCT_ID',
-  CHECKOUT_URL: (userId: string, email: string) => 
-    `https://YOUR_STORE.lemonsqueezy.com/checkout/buy/YOUR_PRODUCT_ID?checkout[custom][user_id]=${userId}&checkout[email]=${encodeURIComponent(email)}`,
-  BILLING_URL: 'https://YOUR_STORE.lemonsqueezy.com/billing',
+  // Generate checkout URL with user data
+  CHECKOUT_URL: (userId: string, email: string) => {
+    const baseUrl = `https://${config.LEMON_SQUEEZY_STORE_SLUG}.lemonsqueezy.com`;
+    const variantId = config.LEMON_SQUEEZY_VARIANT_ID;
+    const params = new URLSearchParams({
+      'checkout[custom][user_id]': userId,
+      'checkout[email]': email,
+    });
+    return `${baseUrl}/checkout/buy/${variantId}?${params.toString()}`;
+  },
+  
+  // Customer billing portal
+  BILLING_URL: `https://${config.LEMON_SQUEEZY_STORE_SLUG}.lemonsqueezy.com/billing`,
 };
 
-export const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
+// Google OAuth
+export const GOOGLE_CLIENT_ID = config.GOOGLE_CLIENT_ID;
 
+// Temp Email API
 export const TEMP_EMAIL_API = 'https://api.mail.tm';
 
+// Storage Keys
 export const STORAGE_KEYS = {
   USER: 'user',
   SUBSCRIPTION: 'subscription',
