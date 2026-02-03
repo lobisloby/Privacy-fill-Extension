@@ -20,10 +20,7 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
 
-    /* Chrome Extension */
-    "types": ["chrome", "vite/client"],
-
-    /* Path mapping */
+    /* Paths */
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
