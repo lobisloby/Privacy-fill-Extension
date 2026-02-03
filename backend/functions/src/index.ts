@@ -1,32 +1,134 @@
+import * as functions from 'firebase-functions';
+import * as admin from 'firebase-admin';
+import cors from 'cors';
+
+// Initialize Firebase Admin
+admin.initializeApp();
+
+// Import handlers
+import { registerUser, getUser } from './handlers/users';
+import { getSubscriptionStatus, trackUsage } from './handlers/subscriptions';
+import { handleLemonSqueezyWebhook } from './handlers/webhooks';
+
+// CORS configuration
+const corsMiddleware = cors({ origin: true });
+
+// Helper to wrap handlers with CORS
+function withCors(
+  handler: (req: functions.https.Request, res: functions.Response) => Promise<void> | void
+) {
+  return (req: functions.https.Request, res: functions.Response) => {
+    corsMiddleware(req, res, () => {
+      handler(req, res);
+    });
+  };
+}
+
+// ============================================
+// USER ENDPOINTS
+// ============================================
+
 /**
- * Import function triggers from their respective submodules:
- *
- * import {onCall} from "firebase-functions/v2/https";
- * import {onDocumentWritten} from "firebase-functions/v2/firestore";
- *
- * See a full list of supported triggers at https://firebase.google.com/docs/functions
+ * Register a new user
+ * POST /registerUser
+ * Body: { userId, email, name }
  */
+export const registerUserFn = functions.https.onRequest(
+  withCors(async (req, res) => {
+    if (req.method !== 'POST') {
+      res.status(405).json({ success: false, error: 'Method not allowed' });
+      return;
+    }
 
-import {setGlobalOptions} from "firebase-functions";
-import {onRequest} from "firebase-functions/https";
-import * as logger from "firebase-functions/logger";
+    const { userId, email, name } = req.body;
+    await registerUser(userId, email, name, res);
+  })
+);
 
-// Start writing functions
-// https://firebase.google.com/docs/functions/typescript
+/**
+ * Get user details
+ * GET /getUser?userId=xxx
+ */
+export const getUserFn = functions.https.onRequest(
+  withCors(async (req, res) => {
+    if (req.method !== 'GET') {
+      res.status(405).json({ success: false, error: 'Method not allowed' });
+      return;
+    }
 
-// For cost control, you can set the maximum number of containers that can be
-// running at the same time. This helps mitigate the impact of unexpected
-// traffic spikes by instead downgrading performance. This limit is a
-// per-function limit. You can override the limit for each function using the
-// `maxInstances` option in the function's options, e.g.
-// `onRequest({ maxInstances: 5 }, (req, res) => { ... })`.
-// NOTE: setGlobalOptions does not apply to functions using the v1 API. V1
-// functions should each use functions.runWith({ maxInstances: 10 }) instead.
-// In the v1 API, each function can only serve one request per container, so
-// this will be the maximum concurrent request count.
-setGlobalOptions({ maxInstances: 10 });
+    const userId = req.query.userId as string;
+    await getUser(userId, res);
+  })
+);
 
-// export const helloWorld = onRequest((request, response) => {
-//   logger.info("Hello logs!", {structuredData: true});
-//   response.send("Hello from Firebase!");
-// });
+// ============================================
+// SUBSCRIPTION ENDPOINTS
+// ============================================
+
+/**
+ * Get subscription status
+ * GET /getSubscriptionStatus?userId=xxx
+ */
+export const getSubscriptionStatusFn = functions.https.onRequest(
+  withCors(async (req, res) => {
+    if (req.method !== 'GET') {
+      res.status(405).json({ success: false, error: 'Method not allowed' });
+      return;
+    }
+
+    const userId = req.query.userId as string;
+    await getSubscriptionStatus(userId, res);
+  })
+);
+
+/**
+ * Track usage
+ * POST /trackUsage
+ * Body: { userId }
+ */
+export const trackUsageFn = functions.https.onRequest(
+  withCors(async (req, res) => {
+    if (req.method !== 'POST') {
+      res.status(405).json({ success: false, error: 'Method not allowed' });
+      return;
+    }
+
+    const { userId } = req.body;
+    await trackUsage(userId, res);
+  })
+);
+
+// ============================================
+// WEBHOOK ENDPOINTS
+// ============================================
+
+/**
+ * Lemon Squeezy webhook handler
+ * POST /lemonSqueezyWebhook
+ */
+export const lemonSqueezyWebhook = functions.https.onRequest(async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ success: false, error: 'Method not allowed' });
+    return;
+  }
+
+  await handleLemonSqueezyWebhook(req, res);
+});
+
+// ============================================
+// HEALTH CHECK
+// ============================================
+
+/**
+ * Health check endpoint
+ * GET /health
+ */
+export const health = functions.https.onRequest(
+  withCors((req, res) => {
+    res.json({
+      success: true,
+      message: 'PrivacyFill API is running',
+      timestamp: new Date().toISOString(),
+    });
+  })
+);
