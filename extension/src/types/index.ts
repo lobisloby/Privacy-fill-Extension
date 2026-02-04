@@ -12,6 +12,22 @@ export interface Identity {
   username: string;
   bio: string | null;
   password: string;
+  // New: Email account credentials for checking inbox
+  emailAccountId?: string;
+  emailAccountToken?: string;
+}
+
+export interface Email {
+  id: string;
+  from: {
+    address: string;
+    name: string;
+  };
+  subject: string;
+  intro: string;
+  text?: string;
+  html?: string[];
+  createdAt: string;
 }
 
 export interface AppState {

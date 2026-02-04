@@ -1,5 +1,5 @@
 // ============================================
-// IDENTITY GENERATOR
+// IDENTITY GENERATOR WITH REAL TEMP EMAIL
 // ============================================
 
 import type { Identity } from '../types';
@@ -18,8 +18,7 @@ const LAST_NAMES = [
   'Rodriguez', 'Martinez', 'Hernandez', 'Lopez', 'Gonzalez', 'Wilson', 'Anderson',
   'Thomas', 'Taylor', 'Moore', 'Jackson', 'Martin', 'Lee', 'Thompson', 'White',
   'Harris', 'Sanchez', 'Clark', 'Ramirez', 'Lewis', 'Robinson', 'Walker', 'Young',
-  'Allen', 'King', 'Wright', 'Scott', 'Torres', 'Nguyen', 'Hill', 'Flores', 'Green',
-  'Adams', 'Nelson', 'Baker', 'Hall', 'Rivera', 'Campbell', 'Mitchell', 'Carter'
+  'Allen', 'King', 'Wright', 'Scott', 'Torres', 'Nguyen', 'Hill', 'Flores', 'Green'
 ];
 
 const BIOS = [
@@ -32,21 +31,11 @@ const BIOS = [
   "Always learning something new 📚",
   "Dreamer & doer ⭐",
   "Keeping it simple 🎯",
-  "Good vibes only ✌️",
-  "Creating my own path 🛤️",
-  "Passionate about life 🌟",
-  "Just getting started 🔥",
-  "Here for the journey 🎒",
-  "Building something cool 🔨"
+  "Good vibes only ✌️"
 ];
 
-const EMAIL_DOMAINS = [
-  'tempbox.email',
-  'quickmail.dev',
-  'mailtemp.net',
-  'inboxfast.org',
-  'randomail.io'
-];
+// mail.tm API
+const MAIL_API = 'https://api.mail.tm';
 
 class Generator {
   private random<T>(arr: T[]): T {
@@ -69,39 +58,114 @@ class Generator {
     const symbols = '!@#$%&*';
     const all = lower + upper + nums + symbols;
 
-    // Ensure at least one of each type
     let pass = '';
     pass += this.random(lower.split(''));
     pass += this.random(upper.split(''));
     pass += this.random(nums.split(''));
     pass += this.random(symbols.split(''));
 
-    // Fill the rest
     for (let i = 4; i < length; i++) {
       pass += this.random(all.split(''));
     }
 
-    // Shuffle
     return pass.split('').sort(() => 0.5 - Math.random()).join('');
   }
 
-  generate(includeBio = false): Identity {
+  // Create real temp email using mail.tm
+  async createRealEmail(): Promise<{
+    email: string;
+    password: string;
+    accountId: string;
+    token: string;
+  } | null> {
+    try {
+      // Step 1: Get available domains
+      const domainsRes = await fetch(`${MAIL_API}/domains`);
+      const domainsData = await domainsRes.json();
+      
+      if (!domainsData['hydra:member']?.length) {
+        console.error('No domains available');
+        return null;
+      }
+
+      const domain = domainsData['hydra:member'][0].domain;
+      const emailLocal = this.randomString(10);
+      const email = `${emailLocal}@${domain}`;
+      const password = this.randomString(12);
+
+      // Step 2: Create account
+      const createRes = await fetch(`${MAIL_API}/accounts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: email, password }),
+      });
+
+      if (!createRes.ok) {
+        console.error('Failed to create email account');
+        return null;
+      }
+
+      const accountData = await createRes.json();
+
+      // Step 3: Get auth token
+      const tokenRes = await fetch(`${MAIL_API}/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: email, password }),
+      });
+
+      if (!tokenRes.ok) {
+        console.error('Failed to get token');
+        return null;
+      }
+
+      const tokenData = await tokenRes.json();
+
+      return {
+        email,
+        password,
+        accountId: accountData.id,
+        token: tokenData.token,
+      };
+    } catch (error) {
+      console.error('Error creating temp email:', error);
+      return null;
+    }
+  }
+
+  // Fallback fake email if API fails
+  private createFakeEmail(firstName: string): string {
+    const domains = ['tempbox.email', 'quickmail.dev', 'mailtemp.net'];
+    const num = this.randomNum(100, 9999);
+    return `${firstName.toLowerCase()}${num}@${this.random(domains)}`;
+  }
+
+  async generate(includeBio = false): Promise<Identity> {
     const firstName = this.random(FIRST_NAMES);
     const lastName = this.random(LAST_NAMES);
-    const num = this.randomNum(10, 9999);
-    const domain = this.random(EMAIL_DOMAINS);
 
-    return {
+    // Try to create real temp email
+    const realEmail = await this.createRealEmail();
+
+    const identity: Identity = {
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
       firstName,
       lastName,
       fullName: `${firstName} ${lastName}`,
-      email: `${firstName.toLowerCase()}${num}@${domain}`,
+      email: realEmail?.email || this.createFakeEmail(firstName),
       username: `${firstName.toLowerCase()}_${this.randomString(4)}`,
       bio: includeBio ? this.random(BIOS) : null,
       password: this.generatePassword(),
     };
+
+    // If we have real email, add account credentials
+    if (realEmail) {
+      identity.emailAccountId = realEmail.accountId;
+      identity.emailAccountToken = realEmail.token;
+    }
+
+    return identity;
   }
 }
 
