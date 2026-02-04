@@ -1,55 +1,121 @@
 // ============================================
-// LICENSE VALIDATION
+// LICENSE SERVICE
 // ============================================
 
 import { storage } from '../utils/storage';
+import { api } from './api';
 
-// License format: PF-XXXX-XXXX-XXXX-XXXX
-const LICENSE_REGEX = /^PF-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
+export interface LicenseInfo {
+  key: string;
+  instanceId?: string;
+  activatedAt: string;
+  email?: string;
+  name?: string;
+  productName?: string;
+}
 
 class LicenseService {
-  isValidFormat(key: string): boolean {
-    return LICENSE_REGEX.test(key.toUpperCase().trim());
-  }
-
+  /**
+   * Activate a license key
+   */
   async activate(key: string): Promise<{ success: boolean; message: string }> {
-    const cleanKey = key.toUpperCase().trim();
+    const cleanKey = key.trim();
 
-    if (!this.isValidFormat(cleanKey)) {
+    if (!cleanKey) {
       return {
         success: false,
-        message: 'Invalid license format. Expected: PF-XXXX-XXXX-XXXX-XXXX',
+        message: 'Please enter a license key',
       };
     }
 
-    // For now, accept any valid format
-    // Later: Add API validation with Lemon Squeezy or Gumroad
-    await storage.setPremium(true, cleanKey);
+    // Try to activate with Lemon Squeezy API
+    const result = await api.activateLicense(cleanKey);
+
+    if (result.valid) {
+      // Save license info
+      const licenseInfo: LicenseInfo = {
+        key: cleanKey,
+        instanceId: result.instanceId,
+        activatedAt: new Date().toISOString(),
+        email: result.meta?.customerEmail,
+        name: result.meta?.customerName,
+        productName: result.meta?.productName,
+      };
+
+      await storage.setPremium(true, cleanKey);
+      await chrome.storage.local.set({ licenseInfo });
+
+      return {
+        success: true,
+        message: result.message,
+      };
+    }
 
     return {
-      success: true,
-      message: 'License activated! Enjoy unlimited access.',
+      success: false,
+      message: result.message,
     };
   }
 
-  async deactivate(): Promise<void> {
-    await storage.setPremium(false);
+  /**
+   * Deactivate current license
+   */
+  async deactivate(): Promise<boolean> {
+    try {
+      const info = await this.getInfo();
+      
+      if (info?.key && info?.instanceId) {
+        await api.deactivateLicense(info.key, info.instanceId);
+      }
+
+      await storage.setPremium(false);
+      await chrome.storage.local.remove('licenseInfo');
+      
+      return true;
+    } catch (error) {
+      console.error('Deactivation error:', error);
+      return false;
+    }
   }
 
+  /**
+   * Check if premium is active
+   */
   async isActive(): Promise<boolean> {
     return storage.isPremium();
   }
 
+  /**
+   * Get stored license key
+   */
   async getKey(): Promise<string | null> {
     return storage.getLicenseKey();
   }
 
-  // Generate test key (for development)
-  generateTestKey(): string {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    const segment = () =>
-      Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-    return `PF-${segment()}-${segment()}-${segment()}-${segment()}`;
+  /**
+   * Get full license info
+   */
+  async getInfo(): Promise<LicenseInfo | null> {
+    const data = await chrome.storage.local.get('licenseInfo');
+    return data.licenseInfo || null;
+  }
+
+  /**
+   * Verify license is still valid (periodic check)
+   */
+  async verify(): Promise<boolean> {
+    const key = await this.getKey();
+    if (!key) return false;
+
+    const result = await api.validateLicense(key);
+    
+    if (!result.valid) {
+      // License no longer valid
+      await this.deactivate();
+      return false;
+    }
+
+    return true;
   }
 }
 

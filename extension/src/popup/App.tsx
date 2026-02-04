@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { storage } from '../utils/storage';
 import { generator } from '../services/generator';
 import { inbox } from '../services/inbox';
-import { license } from '../services/license';
+import { license, LicenseInfo } from '../services/license';
 import { FREE_LIMIT, LEMON_SQUEEZY } from '../utils/constants';
 import type { Identity, Email } from '../types';
 
@@ -32,6 +32,7 @@ import {
   FileText,
   Trash2,
   X,
+  Calendar,
 } from 'lucide-react';
 
 export default function App() {
@@ -41,6 +42,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [showLicenseInput, setShowLicenseInput] = useState(false);
   const [licenseKey, setLicenseKey] = useState('');
+  const [isActivating, setIsActivating] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
@@ -63,7 +65,7 @@ export default function App() {
 
   const showToast = (msg: string, type: 'success' | 'error') => {
     setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
+    setTimeout(() => setToast(null), 4000);
   };
 
   const handleGenerate = async () => {
@@ -93,7 +95,8 @@ export default function App() {
       } else {
         showToast('Identity generated!', 'success');
       }
-    } catch {
+    } catch (err) {
+      console.error('Generation error:', err);
       showToast('Generation failed', 'error');
     }
     setIsLoading(false);
@@ -159,13 +162,34 @@ export default function App() {
   };
 
   const handleActivateLicense = async () => {
-    const result = await license.activate(licenseKey);
-    showToast(result.message, result.success ? 'success' : 'error');
-    if (result.success) {
-      setIsPremium(true);
-      setShowLicenseInput(false);
-      setLicenseKey('');
+    if (!licenseKey.trim()) {
+      showToast('Please enter a license key', 'error');
+      return;
     }
+
+    setIsActivating(true);
+
+    try {
+      const result = await license.activate(licenseKey);
+      
+      if (result.success) {
+        showToast(result.message, 'success');
+        setIsPremium(true);
+        setShowLicenseInput(false);
+        setLicenseKey('');
+      } else {
+        showToast(result.message, 'error');
+      }
+    } catch (err) {
+      console.error('Activation error:', err);
+      showToast('Activation failed. Please try again.', 'error');
+    }
+
+    setIsActivating(false);
+  };
+
+  const handleBuyLicense = () => {
+    chrome.tabs.create({ url: LEMON_SQUEEZY.CHECKOUT_URL });
   };
 
   const remaining = Math.max(0, FREE_LIMIT - usageCount);
@@ -194,7 +218,8 @@ export default function App() {
           </div>
           <button
             onClick={handleCheckInbox}
-            className="ml-auto flex items-center gap-1.5 text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-lg transition"
+            disabled={isLoadingEmails}
+            className="ml-auto flex items-center gap-1.5 text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-lg transition disabled:opacity-50"
           >
             <RefreshCw size={12} className={isLoadingEmails ? 'animate-spin' : ''} />
             Refresh
@@ -262,7 +287,7 @@ export default function App() {
           <div className="flex-1 flex flex-col items-center justify-center text-gray-500">
             <MailOpen size={48} className="mb-3 opacity-50" />
             <p className="font-medium">No emails yet</p>
-            <p className="text-xs mt-1 text-gray-600">Emails can take a few seconds to arrive</p>
+            <p className="text-xs mt-1 text-gray-600">Emails can take 10-30 seconds to arrive</p>
             <button
               onClick={handleCheckInbox}
               className="mt-4 flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-xl text-white text-sm transition"
@@ -319,7 +344,7 @@ export default function App() {
               : 'bg-gray-800 text-gray-400'
           }`}
         >
-          {isPremium ? <Crown size={12} /> : null}
+          {isPremium && <Crown size={12} />}
           {isPremium ? 'PRO' : 'FREE'}
         </div>
       </header>
@@ -335,7 +360,7 @@ export default function App() {
               onClick={handleCopyAll}
               className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-white transition"
             >
-              {copiedField === 'all' ? <Check size={12} /> : <Copy size={12} />}
+              {copiedField === 'all' ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
               {copiedField === 'all' ? 'Copied!' : 'Copy All'}
             </button>
           )}
@@ -347,6 +372,7 @@ export default function App() {
               icon={<Mail size={14} />}
               label={hasRealEmail ? 'Email (Live)' : 'Email'}
               value={identity.email}
+              fieldKey="email"
               onCopy={handleCopy}
               copied={copiedField === 'email'}
               highlight={hasRealEmail}
@@ -355,6 +381,7 @@ export default function App() {
               icon={<User size={14} />}
               label="Full Name"
               value={identity.fullName}
+              fieldKey="fullname"
               onCopy={handleCopy}
               copied={copiedField === 'fullname'}
             />
@@ -362,6 +389,7 @@ export default function App() {
               icon={<AtSign size={14} />}
               label="Username"
               value={identity.username}
+              fieldKey="username"
               onCopy={handleCopy}
               copied={copiedField === 'username'}
             />
@@ -375,6 +403,7 @@ export default function App() {
                 icon={<FileText size={14} />}
                 label="Bio"
                 value={identity.bio}
+                fieldKey="bio"
                 onCopy={handleCopy}
                 copied={copiedField === 'bio'}
               />
@@ -452,9 +481,7 @@ export default function App() {
           </div>
           <p className="text-xs text-gray-500 text-center mb-4">
             {remaining > 0 ? (
-              <>
-                {remaining} of {FREE_LIMIT} free generations left
-              </>
+              <>{remaining} of {FREE_LIMIT} free generations left</>
             ) : (
               <span className="text-amber-400 font-medium flex items-center justify-center gap-1">
                 <AlertCircle size={12} />
@@ -478,7 +505,7 @@ export default function App() {
 
             <div className="flex gap-2">
               <button
-                onClick={() => chrome.tabs.create({ url: LEMON_SQUEEZY.CHECKOUT_URL })}
+                onClick={handleBuyLicense}
                 className="flex-1 py-2.5 bg-gradient-to-r from-amber-400 to-orange-500 
                            text-black font-bold rounded-xl hover:opacity-90 transition
                            flex items-center justify-center gap-2"
@@ -488,7 +515,11 @@ export default function App() {
               </button>
               <button
                 onClick={() => setShowLicenseInput(!showLicenseInput)}
-                className="p-2.5 bg-gray-800 hover:bg-gray-700 rounded-xl transition"
+                className={`p-2.5 rounded-xl transition ${
+                  showLicenseInput 
+                    ? 'bg-indigo-600 text-white' 
+                    : 'bg-gray-800 hover:bg-gray-700'
+                }`}
                 title="Enter license key"
               >
                 <Key size={18} />
@@ -498,17 +529,21 @@ export default function App() {
             {/* License Input */}
             {showLicenseInput && (
               <div className="mt-4 pt-4 border-t border-gray-700/50">
+                <p className="text-xs text-gray-400 mb-2">
+                  Enter your license key from the purchase email:
+                </p>
                 <div className="relative">
                   <input
                     type="text"
                     value={licenseKey}
-                    onChange={(e) => setLicenseKey(e.target.value.toUpperCase())}
-                    placeholder="PF-XXXX-XXXX-XXXX-XXXX"
+                    onChange={(e) => setLicenseKey(e.target.value)}
+                    placeholder="XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX"
                     className="w-full px-3 py-2.5 bg-gray-900/50 border border-gray-700 rounded-xl 
                                text-sm font-mono placeholder:text-gray-600 pr-8
                                focus:outline-none focus:border-indigo-500 transition"
+                    disabled={isActivating}
                   />
-                  {licenseKey && (
+                  {licenseKey && !isActivating && (
                     <button
                       onClick={() => setLicenseKey('')}
                       className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-500 hover:text-white"
@@ -519,32 +554,39 @@ export default function App() {
                 </div>
                 <button
                   onClick={handleActivateLicense}
-                  disabled={!licenseKey}
+                  disabled={!licenseKey.trim() || isActivating}
                   className="w-full mt-2 py-2.5 bg-indigo-600 hover:bg-indigo-500 
                              rounded-xl font-semibold text-sm disabled:opacity-50 transition
                              flex items-center justify-center gap-2"
                 >
-                  <Key size={14} />
-                  Activate License
+                  {isActivating ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      Activating...
+                    </>
+                  ) : (
+                    <>
+                      <Key size={14} />
+                      Activate License
+                    </>
+                  )}
                 </button>
               </div>
             )}
           </div>
         </div>
       ) : (
-        <div className="text-center py-4">
-          <span className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-amber-400 to-orange-500 text-black font-bold rounded-full">
-            <Crown size={16} />
-            Premium Active
-          </span>
-        </div>
+        <PremiumStatus onDeactivate={() => {
+          setIsPremium(false);
+          showToast('License deactivated', 'success');
+        }} />
       )}
 
       {/* Footer */}
       <footer className="mt-auto pt-4 border-t border-gray-800/50 flex justify-center items-center gap-4 text-xs text-gray-600">
         <button
-          onClick={() => {
-            storage.clearHistory();
+          onClick={async () => {
+            await storage.clearHistory();
             showToast('History cleared', 'success');
           }}
           className="flex items-center gap-1 hover:text-gray-400 transition"
@@ -571,7 +613,7 @@ function Toast({ toast }: { toast: { msg: string; type: 'success' | 'error' } | 
   return (
     <div
       className={`fixed bottom-4 left-1/2 -translate-x-1/2 px-4 py-2.5 rounded-xl text-sm font-medium 
-                  shadow-lg flex items-center gap-2 animate-[slideUp_0.3s_ease] ${
+                  shadow-lg flex items-center gap-2 z-50 animate-[slideUp_0.3s_ease] ${
                     toast.type === 'success'
                       ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400'
                       : 'bg-red-500/20 border border-red-500/30 text-red-400'
@@ -596,14 +638,13 @@ interface FieldProps {
   icon: React.ReactNode;
   label: string;
   value: string;
+  fieldKey: string;
   onCopy: (text: string, field: string) => void;
   copied: boolean;
   highlight?: boolean;
 }
 
-function Field({ icon, label, value, onCopy, copied, highlight }: FieldProps) {
-  const fieldKey = label.toLowerCase().replace(/\s/g, '');
-
+function Field({ icon, label, value, fieldKey, onCopy, copied, highlight }: FieldProps) {
   return (
     <div>
       <div
@@ -664,6 +705,82 @@ function PasswordField({ value, onCopy, copied }: PasswordFieldProps) {
           {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
         </button>
       </div>
+    </div>
+  );
+}
+
+interface PremiumStatusProps {
+  onDeactivate: () => void;
+}
+
+function PremiumStatus({ onDeactivate }: PremiumStatusProps) {
+  const [licenseInfo, setLicenseInfo] = useState<LicenseInfo | null>(null);
+  const [showDetails, setShowDetails] = useState(false);
+  const [isDeactivating, setIsDeactivating] = useState(false);
+
+  useEffect(() => {
+    loadLicenseInfo();
+  }, []);
+
+  const loadLicenseInfo = async () => {
+    const info = await license.getInfo();
+    setLicenseInfo(info);
+  };
+
+  const handleDeactivate = async () => {
+    if (!confirm('Are you sure you want to deactivate your license?')) return;
+
+    setIsDeactivating(true);
+    await license.deactivate();
+    setIsDeactivating(false);
+    onDeactivate();
+  };
+
+  return (
+    <div className="text-center py-4">
+      <button
+        onClick={() => setShowDetails(!showDetails)}
+        className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-amber-400 to-orange-500 text-black font-bold rounded-full hover:opacity-90 transition"
+      >
+        <Crown size={16} />
+        Premium Active
+      </button>
+
+      {showDetails && licenseInfo && (
+        <div className="mt-4 p-4 bg-gray-800/50 rounded-xl text-left text-sm border border-gray-700/50">
+          <div className="flex items-center gap-2 text-gray-400 mb-2">
+            <Key size={14} />
+            <span className="font-mono text-xs">
+              {licenseInfo.key.length > 16 
+                ? `${licenseInfo.key.substring(0, 8)}...${licenseInfo.key.slice(-8)}`
+                : licenseInfo.key
+              }
+            </span>
+          </div>
+          {licenseInfo.email && (
+            <div className="flex items-center gap-2 text-gray-400 mb-2">
+              <Mail size={14} />
+              <span className="truncate">{licenseInfo.email}</span>
+            </div>
+          )}
+          <div className="flex items-center gap-2 text-gray-500 text-xs mb-3">
+            <Calendar size={12} />
+            Activated: {new Date(licenseInfo.activatedAt).toLocaleDateString()}
+          </div>
+          <button
+            onClick={handleDeactivate}
+            disabled={isDeactivating}
+            className="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50"
+          >
+            {isDeactivating ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <X size={12} />
+            )}
+            {isDeactivating ? 'Deactivating...' : 'Deactivate License'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
