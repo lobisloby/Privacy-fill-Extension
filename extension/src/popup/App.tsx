@@ -1,57 +1,324 @@
-import React from 'react';
-import { AppProvider, useApp } from '@/context/AppContext';
-import { Header } from './components/Header';
-import { AuthSection } from './components/AuthSection';
-import { UserInfo } from './components/UserInfo';
-import { IdentityCard } from './components/IdentityCard';
-import { ActionButtons } from './components/ActionButtons';
-import { UsageSection } from './components/UsageSection';
-import { UpgradeCard } from './components/UpgradeCard';
-import { PremiumBadge } from './components/PremiumBadge';
-import { Footer } from './components/Footer';
-import { ToastContainer } from './components/Toast';
+import React, { useState, useEffect } from 'react';
+import { storage } from '../utils/storage';
+import { generator } from '../services/generator';
+import { license } from '../services/license';
+import { FREE_LIMIT, LEMON_SQUEEZY } from '../utils/constants';
+import type { Identity } from '../types';
 
-function AppContent() {
-  const { user, isLoading } = useApp();
+export default function App() {
+  const [identity, setIdentity] = useState<Identity | null>(null);
+  const [isPremium, setIsPremium] = useState(false);
+  const [usageCount, setUsageCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showLicenseInput, setShowLicenseInput] = useState(false);
+  const [licenseKey, setLicenseKey] = useState('');
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-[520px] bg-dark-primary">
-        <div className="text-center">
-          <div className="text-4xl mb-4 animate-pulse">🛡️</div>
-          <div className="text-gray-400">Loading...</div>
-        </div>
-      </div>
-    );
-  }
+  useEffect(() => {
+    loadState();
+  }, []);
+
+  const loadState = async () => {
+    const state = await storage.getState();
+    setIdentity(state.currentIdentity);
+    setIsPremium(state.isPremium);
+    setUsageCount(state.usageCount);
+  };
+
+  const showToast = (msg: string, type: 'success' | 'error') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleGenerate = async () => {
+    if (!isPremium && usageCount >= FREE_LIMIT) {
+      showToast('Free limit reached! Upgrade to Premium.', 'error');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const newIdentity = generator.generate(isPremium);
+      await storage.setCurrentIdentity(newIdentity);
+      if (!isPremium) {
+        const newCount = await storage.incrementUsage();
+        setUsageCount(newCount);
+      }
+      setIdentity(newIdentity);
+      showToast('Identity generated!', 'success');
+    } catch {
+      showToast('Generation failed', 'error');
+    }
+    setIsLoading(false);
+  };
+
+  const handleAutoFill = async () => {
+    if (!identity) {
+      showToast('Generate an identity first!', 'error');
+      return;
+    }
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab.id) {
+        await chrome.tabs.sendMessage(tab.id, { action: 'AUTOFILL', identity });
+      }
+    } catch {
+      showToast('Cannot fill on this page', 'error');
+    }
+  };
+
+  const handleCopy = async (text: string, label: string) => {
+    await navigator.clipboard.writeText(text);
+    showToast(`${label} copied!`, 'success');
+  };
+
+  const handleActivateLicense = async () => {
+    const result = await license.activate(licenseKey);
+    showToast(result.message, result.success ? 'success' : 'error');
+    if (result.success) {
+      setIsPremium(true);
+      setShowLicenseInput(false);
+      setLicenseKey('');
+    }
+  };
+
+  const remaining = Math.max(0, FREE_LIMIT - usageCount);
 
   return (
-    <div className="flex flex-col min-h-[520px] p-4 bg-dark-primary">
-      <Header />
-      
-      {!user ? (
-        <AuthSection />
+    <div className="p-4 min-h-[520px] flex flex-col bg-[#0a0a1a]">
+      {/* Header */}
+      <header className="flex items-center justify-between mb-4 pb-3 border-b border-gray-800">
+        <div className="flex items-center gap-2">
+          <span className="text-2xl">🛡️</span>
+          <h1 className="text-lg font-bold bg-gradient-to-r from-indigo-400 to-emerald-400 bg-clip-text text-transparent">
+            PrivacyFill
+          </h1>
+        </div>
+        <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${
+          isPremium 
+            ? 'bg-gradient-to-r from-amber-400 to-orange-500 text-black' 
+            : 'bg-gray-800 text-gray-400'
+        }`}>
+          {isPremium ? '👑 PRO' : 'FREE'}
+        </span>
+      </header>
+
+      {/* Identity Card */}
+      <div className="bg-gradient-to-br from-[#12122a] to-[#1a1a35] rounded-2xl p-4 mb-4 border border-gray-800/50">
+        <div className="flex justify-between items-center mb-3">
+          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+            Current Identity
+          </span>
+          {identity && (
+            <button
+              onClick={() => handleCopy(
+                `Email: ${identity.email}\nName: ${identity.fullName}\nUsername: ${identity.username}\nPassword: ${identity.password}`,
+                'All'
+              )}
+              className="text-xs text-gray-500 hover:text-white transition"
+            >
+              📋 Copy All
+            </button>
+          )}
+        </div>
+
+        {identity ? (
+          <div className="space-y-2.5">
+            <Field label="Email" value={identity.email} onCopy={handleCopy} />
+            <Field label="Name" value={identity.fullName} onCopy={handleCopy} />
+            <Field label="Username" value={identity.username} onCopy={handleCopy} />
+            <Field label="Password" value={identity.password} onCopy={handleCopy} isPassword />
+            {isPremium && identity.bio && (
+              <Field label="Bio" value={identity.bio} onCopy={handleCopy} />
+            )}
+          </div>
+        ) : (
+          <div className="text-center py-8 text-gray-500">
+            <div className="text-4xl mb-2">✨</div>
+            <p className="text-sm">Click generate to create an identity</p>
+          </div>
+        )}
+      </div>
+
+      {/* Action Buttons */}
+      <div className="space-y-2.5 mb-4">
+        <button
+          onClick={handleGenerate}
+          disabled={isLoading}
+          className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 
+                     rounded-xl font-semibold text-white shadow-lg shadow-indigo-500/20
+                     disabled:opacity-60 transition-all hover:-translate-y-0.5 active:translate-y-0
+                     flex items-center justify-center gap-2"
+        >
+          {isLoading ? (
+            <span className="animate-spin">⏳</span>
+          ) : (
+            <span>⚡</span>
+          )}
+          Generate New Identity
+        </button>
+
+        <button
+          onClick={handleAutoFill}
+          className="w-full py-3 bg-[#1a1a35] hover:bg-[#252545] border border-gray-700/50 
+                     hover:border-indigo-500/50 rounded-xl font-medium transition-all
+                     flex items-center justify-center gap-2"
+        >
+          <span>✨</span>
+          Auto-Fill This Page
+        </button>
+      </div>
+
+      {/* Free Tier / Premium */}
+      {!isPremium ? (
+        <div className="mb-4">
+          {/* Usage Bar */}
+          <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden mb-2">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${
+                remaining <= 2
+                  ? 'bg-gradient-to-r from-red-500 to-orange-500'
+                  : 'bg-gradient-to-r from-indigo-500 to-emerald-500'
+              }`}
+              style={{ width: `${(usageCount / FREE_LIMIT) * 100}%` }}
+            />
+          </div>
+          <p className="text-xs text-gray-500 text-center mb-4">
+            {remaining > 0 ? (
+              <>{remaining} of {FREE_LIMIT} free generations left</>
+            ) : (
+              <span className="text-amber-400 font-medium">Free limit reached!</span>
+            )}
+          </p>
+
+          {/* Upgrade Card */}
+          <div className="bg-gradient-to-br from-indigo-600/10 to-purple-600/10 border border-indigo-500/20 rounded-2xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-xl">👑</span>
+              <span className="font-bold">Upgrade to Premium</span>
+            </div>
+            <ul className="text-sm text-gray-300 space-y-1.5 mb-4">
+              <li className="flex items-center gap-2">
+                <span className="text-emerald-400">✓</span> Unlimited generations
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="text-emerald-400">✓</span> Auto-generated bios
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="text-emerald-400">✓</span> Lifetime access
+              </li>
+            </ul>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => chrome.tabs.create({ url: LEMON_SQUEEZY.CHECKOUT_URL })}
+                className="flex-1 py-2.5 bg-gradient-to-r from-amber-400 to-orange-500 
+                           text-black font-bold rounded-xl hover:opacity-90 transition"
+              >
+                Get License - $4.99
+              </button>
+              <button
+                onClick={() => setShowLicenseInput(!showLicenseInput)}
+                className="px-4 py-2.5 bg-gray-800 hover:bg-gray-700 rounded-xl transition"
+                title="Enter license key"
+              >
+                🔑
+              </button>
+            </div>
+
+            {/* License Input */}
+            {showLicenseInput && (
+              <div className="mt-4 pt-4 border-t border-gray-700/50">
+                <input
+                  type="text"
+                  value={licenseKey}
+                  onChange={(e) => setLicenseKey(e.target.value.toUpperCase())}
+                  placeholder="PF-XXXX-XXXX-XXXX-XXXX"
+                  className="w-full px-3 py-2.5 bg-gray-900/50 border border-gray-700 rounded-xl 
+                             text-sm font-mono placeholder:text-gray-600
+                             focus:outline-none focus:border-indigo-500 transition"
+                />
+                <button
+                  onClick={handleActivateLicense}
+                  disabled={!licenseKey}
+                  className="w-full mt-2 py-2.5 bg-indigo-600 hover:bg-indigo-500 
+                             rounded-xl font-semibold text-sm disabled:opacity-50 transition"
+                >
+                  Activate License
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       ) : (
-        <div className="flex-1 flex flex-col">
-          <UserInfo />
-          <IdentityCard />
-          <ActionButtons />
-          <UsageSection />
-          <UpgradeCard />
-          <PremiumBadge />
+        <div className="text-center py-4">
+          <span className="inline-flex items-center gap-2 px-5 py-2 bg-gradient-to-r from-amber-400 to-orange-500 text-black font-bold rounded-full">
+            👑 Premium Active
+          </span>
         </div>
       )}
-      
-      <Footer />
-      <ToastContainer />
+
+      {/* Footer */}
+      <footer className="mt-auto pt-4 border-t border-gray-800/50 flex justify-center gap-4 text-xs text-gray-600">
+        <button onClick={() => storage.clearHistory()} className="hover:text-gray-400 transition">
+          Clear History
+        </button>
+        <span>•</span>
+        <span>v1.0.0</span>
+      </footer>
+
+      {/* Toast */}
+      {toast && (
+        <div
+          className={`fixed bottom-4 left-1/2 -translate-x-1/2 px-4 py-2.5 rounded-xl text-sm font-medium
+                      shadow-lg toast-enter ${
+                        toast.type === 'success'
+                          ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400'
+                          : 'bg-red-500/20 border border-red-500/30 text-red-400'
+                      }`}
+        >
+          {toast.msg}
+        </div>
+      )}
     </div>
   );
 }
 
-export default function App() {
+// Field Component
+interface FieldProps {
+  label: string;
+  value: string;
+  onCopy: (text: string, label: string) => void;
+  isPassword?: boolean;
+}
+
+function Field({ label, value, onCopy, isPassword }: FieldProps) {
+  const [show, setShow] = useState(!isPassword);
+
   return (
-    <AppProvider>
-      <AppContent />
-    </AppProvider>
+    <div>
+      <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1 font-medium">
+        {label}
+      </div>
+      <div className="flex items-center gap-2 bg-black/30 px-3 py-2 rounded-lg border border-gray-800/50">
+        <span className={`flex-1 text-sm truncate ${isPassword && !show ? 'font-mono' : ''}`}>
+          {isPassword && !show ? '••••••••••••' : value}
+        </span>
+        {isPassword && (
+          <button
+            onClick={() => setShow(!show)}
+            className="text-gray-500 hover:text-gray-300 transition text-xs"
+          >
+            {show ? '🙈' : '👁️'}
+          </button>
+        )}
+        <button
+          onClick={() => onCopy(value, label)}
+          className="text-gray-500 hover:text-white transition"
+        >
+          📋
+        </button>
+      </div>
+    </div>
   );
 }

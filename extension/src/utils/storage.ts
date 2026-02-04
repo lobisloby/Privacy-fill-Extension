@@ -1,141 +1,124 @@
 // ============================================
-// CHROME STORAGE UTILITIES
+// STORAGE UTILITY
 // ============================================
 
-import type { StorageData, User, Subscription, Identity } from '@/types';
-import { STORAGE_KEYS } from './constants';
+import type { Identity, AppState } from '../types';
+import { FREE_LIMIT } from './constants';
 
-class StorageService {
-  // Get all storage data
-  async getAll(): Promise<Partial<StorageData>> {
-    return chrome.storage.local.get(Object.values(STORAGE_KEYS));
+const KEYS = {
+  IS_PREMIUM: 'pf_isPremium',
+  LICENSE_KEY: 'pf_licenseKey',
+  USAGE_COUNT: 'pf_usageCount',
+  LAST_RESET: 'pf_lastReset',
+  CURRENT_IDENTITY: 'pf_currentIdentity',
+  HISTORY: 'pf_history',
+};
+
+class Storage {
+  // ========== STATE ==========
+  async getState(): Promise<AppState> {
+    const data = await chrome.storage.local.get(Object.values(KEYS));
+    return {
+      isPremium: data[KEYS.IS_PREMIUM] || false,
+      licenseKey: data[KEYS.LICENSE_KEY] || null,
+      usageCount: data[KEYS.USAGE_COUNT] || 0,
+      lastResetDate: data[KEYS.LAST_RESET] || new Date().toISOString(),
+      currentIdentity: data[KEYS.CURRENT_IDENTITY] || null,
+      identityHistory: data[KEYS.HISTORY] || [],
+    };
   }
 
-  // Get specific item
-  async get<K extends keyof StorageData>(key: K): Promise<StorageData[K] | null> {
-    const result = await chrome.storage.local.get(key);
-    return result[key] ?? null;
-  }
-
-  // Set specific item
-  async set<K extends keyof StorageData>(key: K, value: StorageData[K]): Promise<void> {
-    await chrome.storage.local.set({ [key]: value });
-  }
-
-  // Remove specific item
-  async remove(key: keyof StorageData): Promise<void> {
-    await chrome.storage.local.remove(key);
-  }
-
-  // Clear all storage
-  async clear(): Promise<void> {
-    await chrome.storage.local.clear();
-  }
-
-  // ============================================
-  // USER METHODS
-  // ============================================
-  
-  async getUser(): Promise<User | null> {
-    return this.get('user');
-  }
-
-  async setUser(user: User): Promise<void> {
-    await this.set('user', user);
-  }
-
-  async removeUser(): Promise<void> {
-    await this.remove('user');
-  }
-
-  // ============================================
-  // SUBSCRIPTION METHODS
-  // ============================================
-  
-  async getSubscription(): Promise<Subscription | null> {
-    return this.get('subscription');
-  }
-
-  async setSubscription(subscription: Subscription): Promise<void> {
-    await this.set('subscription', subscription);
-  }
-
+  // ========== PREMIUM ==========
   async isPremium(): Promise<boolean> {
-    const subscription = await this.getSubscription();
-    return subscription?.status === 'active';
+    const data = await chrome.storage.local.get(KEYS.IS_PREMIUM);
+    return data[KEYS.IS_PREMIUM] || false;
   }
 
-  // ============================================
-  // IDENTITY METHODS
-  // ============================================
-  
-  async getCurrentIdentity(): Promise<Identity | null> {
-    return this.get('currentIdentity');
+  async setPremium(value: boolean, key?: string): Promise<void> {
+    await chrome.storage.local.set({
+      [KEYS.IS_PREMIUM]: value,
+      [KEYS.LICENSE_KEY]: key || null,
+    });
   }
 
-  async setCurrentIdentity(identity: Identity): Promise<void> {
-    await this.set('currentIdentity', identity);
-    
-    // Also add to history
-    await this.addToHistory(identity);
+  async getLicenseKey(): Promise<string | null> {
+    const data = await chrome.storage.local.get(KEYS.LICENSE_KEY);
+    return data[KEYS.LICENSE_KEY] || null;
   }
 
-  async getIdentityHistory(): Promise<Identity[]> {
-    const history = await this.get('identityHistory');
-    return history ?? [];
-  }
-
-  async addToHistory(identity: Identity): Promise<void> {
-    const history = await this.getIdentityHistory();
-    history.unshift(identity);
-    // Keep only last 50 identities
-    await this.set('identityHistory', history.slice(0, 50));
-  }
-
-  async clearHistory(): Promise<void> {
-    await this.set('identityHistory', []);
-  }
-
-  // ============================================
-  // USAGE METHODS
-  // ============================================
-  
+  // ========== USAGE ==========
   async getUsageCount(): Promise<number> {
-    const count = await this.get('usageCount');
-    return count ?? 0;
+    await this.checkMonthlyReset();
+    const data = await chrome.storage.local.get(KEYS.USAGE_COUNT);
+    return data[KEYS.USAGE_COUNT] || 0;
   }
 
   async incrementUsage(): Promise<number> {
-    const currentCount = await this.getUsageCount();
-    const newCount = currentCount + 1;
-    await this.set('usageCount', newCount);
+    const count = await this.getUsageCount();
+    const newCount = count + 1;
+    await chrome.storage.local.set({ [KEYS.USAGE_COUNT]: newCount });
     return newCount;
   }
 
-  async resetUsage(): Promise<void> {
-    await this.set('usageCount', 0);
-    await this.set('lastResetDate', new Date().toISOString());
+  async checkMonthlyReset(): Promise<void> {
+    const data = await chrome.storage.local.get(KEYS.LAST_RESET);
+    const lastReset = data[KEYS.LAST_RESET];
+
+    if (!lastReset) {
+      await chrome.storage.local.set({
+        [KEYS.LAST_RESET]: new Date().toISOString(),
+        [KEYS.USAGE_COUNT]: 0,
+      });
+      return;
+    }
+
+    const lastDate = new Date(lastReset);
+    const now = new Date();
+
+    if (now.getMonth() !== lastDate.getMonth() || now.getFullYear() !== lastDate.getFullYear()) {
+      await chrome.storage.local.set({
+        [KEYS.LAST_RESET]: now.toISOString(),
+        [KEYS.USAGE_COUNT]: 0,
+      });
+    }
   }
 
-  async checkAndResetMonthlyUsage(): Promise<boolean> {
-    const lastResetDate = await this.get('lastResetDate');
-    const now = new Date();
-    
-    if (!lastResetDate) {
-      await this.resetUsage();
-      return true;
-    }
+  async canGenerate(): Promise<boolean> {
+    if (await this.isPremium()) return true;
+    const count = await this.getUsageCount();
+    return count < FREE_LIMIT;
+  }
 
-    const lastReset = new Date(lastResetDate);
-    if (now.getMonth() !== lastReset.getMonth() || 
-        now.getFullYear() !== lastReset.getFullYear()) {
-      await this.resetUsage();
-      return true;
-    }
+  // ========== IDENTITY ==========
+  async getCurrentIdentity(): Promise<Identity | null> {
+    const data = await chrome.storage.local.get(KEYS.CURRENT_IDENTITY);
+    return data[KEYS.CURRENT_IDENTITY] || null;
+  }
 
-    return false;
+  async setCurrentIdentity(identity: Identity): Promise<void> {
+    await chrome.storage.local.set({ [KEYS.CURRENT_IDENTITY]: identity });
+    await this.addToHistory(identity);
+  }
+
+  async getHistory(): Promise<Identity[]> {
+    const data = await chrome.storage.local.get(KEYS.HISTORY);
+    return data[KEYS.HISTORY] || [];
+  }
+
+  async addToHistory(identity: Identity): Promise<void> {
+    const history = await this.getHistory();
+    const updated = [identity, ...history].slice(0, 50);
+    await chrome.storage.local.set({ [KEYS.HISTORY]: updated });
+  }
+
+  async clearHistory(): Promise<void> {
+    await chrome.storage.local.set({ [KEYS.HISTORY]: [] });
+  }
+
+  async clearAll(): Promise<void> {
+    await chrome.storage.local.clear();
   }
 }
 
-export const storage = new StorageService();
+export const storage = new Storage();
 export default storage;
