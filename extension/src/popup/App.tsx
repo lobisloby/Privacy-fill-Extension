@@ -6,6 +6,7 @@ import { license, LicenseInfo } from '../services/license';
 import { FREE_LIMIT, LEMON_SQUEEZY } from '../utils/constants';
 import type { Identity, Email } from '../types';
 
+
 // Import Lucide Icons
 import {
   Shield,
@@ -330,9 +331,11 @@ export default function App() {
       {/* Header */}
       <header className="flex items-center justify-between mb-4 pb-3 border-b border-gray-800">
         <div className="flex items-center gap-2.5">
-          <div className="p-1.5 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg">
-            <Shield size={20} className="text-white" />
-          </div>
+          <img 
+            src={chrome.runtime.getURL('icons/icon32.png')} 
+            alt="PrivacyFill" 
+            className="w-8 h-8" 
+          />
           <h1 className="text-lg font-bold bg-gradient-to-r from-indigo-400 to-emerald-400 bg-clip-text text-transparent">
             PrivacyFill
           </h1>
