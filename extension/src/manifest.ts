@@ -1,16 +1,13 @@
-// ============================================
-// EXTENSION MANIFEST
-// ============================================
-
 import { defineManifest } from '@crxjs/vite-plugin';
 
 export default defineManifest({
   manifest_version: 3,
   name: 'PrivacyFill - Temp Identity Generator',
   version: '1.0.0',
-  description: 'Generate temporary identities and auto-fill forms with 1 click!',
+  description: 'Generate temporary identities and auto-fill signup forms. Real temp emails, fake names, and passwords in 1 click!',
 
-  permissions: ['activeTab', 'storage', 'scripting'],
+  
+  permissions: ['activeTab', 'storage'],
 
   host_permissions: ['<all_urls>'],
 
@@ -18,6 +15,7 @@ export default defineManifest({
     default_popup: 'src/popup/index.html',
     default_icon: {
       '16': 'icons/icon16.png',
+      '32': 'icons/icon32.png',
       '48': 'icons/icon48.png',
       '128': 'icons/icon128.png',
     },
@@ -37,6 +35,7 @@ export default defineManifest({
 
   icons: {
     '16': 'icons/icon16.png',
+    '32': 'icons/icon32.png',
     '48': 'icons/icon48.png',
     '128': 'icons/icon128.png',
   },
